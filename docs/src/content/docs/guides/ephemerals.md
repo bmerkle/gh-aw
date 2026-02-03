@@ -391,5 +391,5 @@ If expiration isn't working as expected:
 - [Triggers Reference](/gh-aw/reference/triggers/) - Complete trigger configuration including `stop-after`
 - [Safe Outputs Reference](/gh-aw/reference/safe-outputs/) - All safe output types and expiration options
 - [SideRepoOps Guide](/gh-aw/guides/siderepoops/) - Complete setup for side repository operations
-- [Security Best Practices](/gh-aw/guides/security/) - Authentication and security considerations
+- [Security Best Practices](/gh-aw/introduction/architecture/) - Authentication and security considerations
 - [Campaign Workflows](/gh-aw/guides/campaigns/) - Orchestrating multi-workflow initiatives

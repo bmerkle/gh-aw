@@ -126,7 +126,7 @@ tools:
     lockdown: false  # Explicitly disable (use with caution in public repos)
 ```
 
-See [Automatic GitHub Lockdown](/gh-aw/guides/security/#automatic-github-lockdown-on-public-repositories) for security implications.
+See [Automatic GitHub Lockdown](/gh-aw/introduction/architecture/#automatic-github-lockdown-on-public-repositories) for security implications.
 
 ### GitHub App Authentication
 

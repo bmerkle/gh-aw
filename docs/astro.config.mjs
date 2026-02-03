@@ -166,7 +166,6 @@ export default defineConfig({
 					items: [
 						{ label: 'GitHub Actions Primer', link: '/guides/github-actions-primer/' },
 						{ label: 'Packaging & Distribution', link: '/guides/packaging-imports/' },
-						{ label: 'Security Best Practices', link: '/guides/security/' },
 						{ label: 'Using MCPs', link: '/guides/mcps/' },
 						{ label: 'Custom Safe Outputs', link: '/guides/custom-safe-outputs/' },
 						{ label: 'Threat Detection', link: '/guides/threat-detection/' },
