@@ -28,7 +28,7 @@ function visit(node) {
 	}
 
 	if (node.type === 'code' && typeof node.value === 'string') {
-		node.value = stripEmojis(node.value);
+		node.value = stripEmojis(node.value, { preserveWhitespace: true });
 	}
 
 	if (node.type === 'html' && typeof node.value === 'string') {
@@ -111,8 +111,9 @@ const replacements = new Map([
 
 /**
  * @param {string} input
+ * @param {{ preserveWhitespace?: boolean }} [options]
  */
-function stripEmojis(input) {
+function stripEmojis(input, options) {
 	let output = input;
 
 	for (const [from, to] of replacements.entries()) {
@@ -126,7 +127,10 @@ function stripEmojis(input) {
 	// Node 20+ supports Unicode property escapes.
 	output = output.replace(/\p{Extended_Pictographic}+/gu, '');
 
-	// Collapse double spaces introduced by removals.
-	output = output.replace(/[ \t]{2,}/g, ' ');
+	// Collapse double spaces introduced by removals, but not inside code blocks
+	// where whitespace (indentation) is significant.
+	if (!options?.preserveWhitespace) {
+		output = output.replace(/[ \t]{2,}/g, ' ');
+	}
 	return output;
 }
