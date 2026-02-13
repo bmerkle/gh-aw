@@ -26,7 +26,7 @@ gh extension install github/gh-aw
 
 gh extension list
 NAME   REPO          VERSION
-gh aw  github/gh-aw  v0.40.01
+gh aw  github/gh-aw  v0.40.1
 ```
 
 ### Bug Fixes
