@@ -688,3 +688,43 @@ func mergeMessagesConfig(result, imported *SafeOutputMessagesConfig) *SafeOutput
 	}
 	return result
 }
+
+// MergeFeatures merges features configurations from imports with top-level features
+// Features from top-level take precedence over imported features
+func (c *Compiler) MergeFeatures(topFeatures map[string]any, importedFeatures []map[string]any) (map[string]any, error) {
+	importsLog.Print("Merging features from imports")
+
+	// If no imported features, return top-level features as-is
+	if len(importedFeatures) == 0 {
+		importsLog.Print("No imported features to merge")
+		return topFeatures, nil
+	}
+
+	// Start with top-level features or create a new map
+	result := make(map[string]any)
+	if topFeatures != nil {
+		for k, v := range topFeatures {
+			result[k] = v
+		}
+		importsLog.Printf("Starting with %d top-level features", len(topFeatures))
+	}
+
+	// Process each imported features map
+	importsLog.Printf("Processing %d imported feature maps", len(importedFeatures))
+
+	for _, importedFeaturesMap := range importedFeatures {
+		// Merge features - top-level features take precedence over imported ones
+		for featureName, featureValue := range importedFeaturesMap {
+			// Only add feature if it's not already defined in top-level
+			if _, exists := result[featureName]; !exists {
+				importsLog.Printf("Merging feature from import: %s", featureName)
+				result[featureName] = featureValue
+			} else {
+				importsLog.Printf("Skipping imported feature (top-level takes precedence): %s", featureName)
+			}
+		}
+	}
+
+	importsLog.Printf("Successfully merged features: total=%d", len(result))
+	return result, nil
+}
