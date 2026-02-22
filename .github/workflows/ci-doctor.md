@@ -50,6 +50,110 @@ tools:
 
 timeout-minutes: 20
 
+steps:
+  - name: Pre-download CI failure logs and artifacts, apply heuristics
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      REPO: ${{ github.repository }}
+    run: |
+      set -e
+      LOG_DIR="/tmp/ci-doctor/logs"
+      ARTIFACT_DIR="/tmp/ci-doctor/artifacts"
+      FILTERED_DIR="/tmp/ci-doctor/filtered"
+      mkdir -p "$LOG_DIR" "$ARTIFACT_DIR" "$FILTERED_DIR"
+
+      echo "=== CI Doctor: Pre-downloading logs and artifacts for run $RUN_ID ==="
+
+      # Get failed jobs and their failed steps
+      gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+        --jq '[.jobs[] | select(.conclusion == "failed" or .conclusion == "cancelled") | {id:.id, name:.name, failed_steps:[.steps[]? | select(.conclusion=="failed") | .name]}]' \
+        > "$LOG_DIR/failed-jobs.json"
+
+      FAILED_COUNT=$(jq 'length' "$LOG_DIR/failed-jobs.json")
+      echo "Found $FAILED_COUNT failed job(s)"
+
+      if [ "$FAILED_COUNT" -eq 0 ]; then
+        echo "No failed jobs found, skipping log download"
+        exit 0
+      fi
+
+      echo "Failed jobs:"
+      cat "$LOG_DIR/failed-jobs.json"
+
+      # Download logs for each failed job and apply generic error heuristics
+      jq -r '.[].id' "$LOG_DIR/failed-jobs.json" | while read -r JOB_ID; do
+        LOG_FILE="$LOG_DIR/job-${JOB_ID}.log"
+        echo "Downloading log for job $JOB_ID..."
+        gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" > "$LOG_FILE" 2>/dev/null \
+          || echo "(log download failed)" > "$LOG_FILE"
+        echo "  -> Saved $(wc -l < "$LOG_FILE") lines to $LOG_FILE"
+
+        # Apply generic heuristics: find lines with common error indicators
+        HINTS_FILE="$FILTERED_DIR/job-${JOB_ID}-hints.txt"
+        grep -n -iE "(error[: ]|ERROR|FAIL|panic:|fatal[: ]|undefined[: ]|exception|exit status [^0])" \
+          "$LOG_FILE" | head -30 > "$HINTS_FILE" 2>/dev/null || true
+
+        if [ -s "$HINTS_FILE" ]; then
+          echo "  -> Pre-located $(wc -l < "$HINTS_FILE") hint line(s) in $HINTS_FILE"
+        else
+          echo "  -> No error hints found in $LOG_FILE"
+        fi
+      done
+
+      # Download and unpack all artifacts from the failed run
+      echo ""
+      echo "=== Downloading artifacts for run $RUN_ID ==="
+      gh run download "$RUN_ID" --repo "$REPO" --dir "$ARTIFACT_DIR" 2>/dev/null \
+        || echo "No artifacts available or download failed"
+
+      # Apply heuristics to artifact text files
+      find "$ARTIFACT_DIR" -type f \( \
+        -name "*.txt" -o -name "*.log" -o -name "*.json" \
+        -o -name "*.xml" -o -name "*.out" -o -name "*.err" \
+      \) | while read -r ARTIFACT_FILE; do
+        REL_PATH="${ARTIFACT_FILE#$ARTIFACT_DIR/}"
+        SAFE_NAME=$(echo "$REL_PATH" | tr '/' '_')
+        HINTS_FILE="$FILTERED_DIR/artifact-${SAFE_NAME}-hints.txt"
+        grep -n -iE "(error[: ]|ERROR|FAIL|panic:|fatal[: ]|undefined[: ]|exception|exit status [^0])" \
+          "$ARTIFACT_FILE" | head -30 > "$HINTS_FILE" 2>/dev/null || true
+        if [ -s "$HINTS_FILE" ]; then
+          echo "  -> Artifact hints: $HINTS_FILE ($(wc -l < "$HINTS_FILE") lines from $ARTIFACT_FILE)"
+        fi
+      done
+
+      # Write summary for the agent
+      SUMMARY_FILE="/tmp/ci-doctor/summary.txt"
+      {
+        echo "=== CI Doctor Pre-Analysis ==="
+        echo "Run ID: $RUN_ID"
+        echo ""
+        echo "Failed jobs (details in $LOG_DIR/failed-jobs.json):"
+        jq -r '.[] | "  Job \(.id): \(.name)\n    Failed steps: \(.failed_steps | join(", "))"' \
+          "$LOG_DIR/failed-jobs.json"
+        echo ""
+        echo "Downloaded log files ($LOG_DIR):"
+        for LOG_FILE in "$LOG_DIR"/job-*.log; do
+          [ -f "$LOG_FILE" ] || continue
+          echo "  $LOG_FILE ($(wc -l < "$LOG_FILE") lines)"
+        done
+        echo ""
+        echo "Downloaded artifact files ($ARTIFACT_DIR):"
+        find "$ARTIFACT_DIR" -type f | while read -r f; do
+          echo "  $f"
+        done
+        echo ""
+        echo "Filtered hint files ($FILTERED_DIR):"
+        for HINTS_FILE in "$FILTERED_DIR"/*-hints.txt; do
+          [ -s "$HINTS_FILE" ] || continue
+          echo "  $HINTS_FILE ($(wc -l < "$HINTS_FILE") matches)"
+          head -3 "$HINTS_FILE" | sed 's/^/    /'
+        done
+      } | tee "$SUMMARY_FILE"
+
+      echo ""
+      echo "✅ Pre-analysis complete. Agent should start with $SUMMARY_FILE"
+
 source: githubnext/agentics/workflows/ci-doctor.md@ea350161ad5dcc9624cf510f134c6a9e39a6f94d
 ---
 # CI Failure Doctor
@@ -64,6 +168,18 @@ You are the CI Failure Doctor, an expert investigative agent that analyzes faile
 - **Run URL**: ${{ github.event.workflow_run.html_url }}
 - **Head SHA**: ${{ github.event.workflow_run.head_sha }}
 
+## Pre-Analysis Data
+
+Logs and artifacts have been pre-downloaded before this session started:
+
+- **Summary**: `/tmp/ci-doctor/summary.txt` — failed jobs, failed steps, all file locations, and pre-located error hints
+- **Job metadata**: `/tmp/ci-doctor/logs/failed-jobs.json` — structured list of failed jobs and their failed steps
+- **Log files**: `/tmp/ci-doctor/logs/job-<job-id>.log` — full job logs downloaded from GitHub Actions
+- **Artifact files**: `/tmp/ci-doctor/artifacts/` — all workflow run artifacts, unpacked by artifact name
+- **Hint files**: `/tmp/ci-doctor/filtered/*-hints.txt` — pre-located error lines (from logs and artifacts) via generic grep heuristics
+
+**Start here**: Read `/tmp/ci-doctor/summary.txt` first — it lists every file location and the first few hint matches. Then examine the relevant hint files to jump directly to error locations (read ±10 lines around each hinted line number before loading the full log or artifact).
+
 ## Investigation Protocol
 
 **ONLY proceed if the workflow conclusion is 'failure' or 'cancelled'**. If the workflow was successful, **call the `noop` tool** immediately and exit.
@@ -77,15 +193,20 @@ You are the CI Failure Doctor, an expert investigative agent that analyzes faile
 4. **Quick Assessment**: Determine if this is a new type of failure or a recurring pattern
 
 ### Phase 2: Deep Log Analysis
-1. **Retrieve Logs**: Use `get_job_logs` with `failed_only=true`, `return_content=true`, and `tail_lines=200` to get the most relevant portion of logs directly (avoids downloading large blob files). Do NOT use `web-fetch` on blob storage log URLs.
-2. **Pattern Recognition**: Analyze logs for:
+1. **Use Pre-Downloaded Logs and Artifacts**: Use the files in `/tmp/ci-doctor/`:
+   - Read the summary and hint files first (minimal context load)
+   - Read ±10 lines around each hinted line number in the full log or artifact file
+   - Check `/tmp/ci-doctor/artifacts/` for any structured output (test reports, coverage, etc.)
+   - Only load the full log content if the hints are insufficient
+2. **Fallback Log Retrieval**: If pre-downloaded files are unavailable, use `get_job_logs` with `failed_only=true`, `return_content=true`, and `tail_lines=100` to get the most relevant portion of logs directly (avoids downloading large blob files). Do NOT use `web-fetch` on blob storage log URLs.
+3. **Pattern Recognition**: Analyze logs for:
    - Error messages and stack traces
    - Dependency installation failures
    - Test failures with specific patterns
    - Infrastructure or runner issues
    - Timeout patterns
    - Memory or resource constraints
-3. **Extract Key Information**:
+4. **Extract Key Information**:
    - Primary error messages
    - File paths and line numbers where failures occurred
    - Test names that failed
