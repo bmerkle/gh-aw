@@ -102,7 +102,36 @@ jobs:
             echo "::endgroup::"
           done
 
-  # 4) write-all — also succeeds; shows a broader token example
+  # 4) No contents permission at all — only unrelated scopes (expect 403)
+  no_contents:
+    name: No contents permission (expect 403)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Check three users via REST
+        shell: bash
+        run: |
+          set +e
+          IFS=' ' read -r -a users <<< "${USERS}"
+          for u in "${users[@]}"; do
+            echo "::group::GET /repos/${{ github.repository }}/collaborators/$u/permission"
+            code=$(curl -sS -o resp.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${API_URL}/repos/${{ github.repository }}/collaborators/$u/permission")
+            echo "HTTP $code"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+              jq -r '{user:.user.login, permission, role_name} | @text "user=@\(.user) permission=\(.permission) role=\(.role_name)"' resp.json
+            else
+              cat resp.json
+            fi
+            echo "::endgroup::"
+          done
+
+  # 5) write-all — also succeeds; shows a broader token example
   write_all:
     name: With write-all (should succeed)
     runs-on: ubuntu-latest
